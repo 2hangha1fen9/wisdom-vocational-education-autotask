@@ -1,0 +1,29 @@
+version: '3'
+services:
+  redis:
+    image: redis
+    container_name: redis
+    ports:
+    - 6379
+    volumes:
+    - ./data/redis:/data
+    command:
+    - --appendonly yes
+    environment:
+    - TZ=Asia/Shanghai
+    restart: always
+  web:
+    image: 1287609286/internshiphelper:1.0
+    container_name: web
+    ports:
+    - 9999:80
+    environment:
+    - TZ=Asia/Shanghai
+    restart: always
+  tasks:
+    image: 1287609286/scheduletasks:1.0
+    ports:
+    - 7777:8888
+    environment:
+    - TZ=Asia/Shanghai
+    restart: always
