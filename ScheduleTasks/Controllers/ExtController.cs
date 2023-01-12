@@ -26,7 +26,7 @@ namespace ScheduleTasks.Controllers
             RecurringJob.AddOrUpdate<CheckInJob>(
                 checkInReq.LoginName,
                 job => job.CheckIn(reqJson),
-                Cron.Daily(checkInReq.StartTime[0], checkInReq.StartTime[1])
+                Cron.Daily(checkInReq.StartTime[0], checkInReq.StartTime[1]),TimeZoneInfo.Local
             );
             return Ok();
         }
@@ -62,6 +62,40 @@ namespace ScheduleTasks.Controllers
                 {
                     return null;
                 }
+            }
+        }
+
+        /// <summary>
+        /// 获取最佳签到时间
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        public int[] GetAppropriateTime()
+        {
+            using (var con = JobStorage.Current.GetConnection())
+            {
+                //根据时间进行分组查询
+                var jobGroups = con.GetRecurringJobs().GroupBy(job => job.Cron).OrderByDescending(job => job.Count()).ToList();
+                var baseCron = "";
+                //如果没有任何计划任务给出默认crontab表达式 0 7 * * *
+                if (jobGroups.Count() == 0)
+                {
+                    baseCron = Cron.Daily(7, 0);
+                }
+                else 
+                {
+                    //没有满足的Cron表达式则从7：00点遍历，时间向后推5分钟
+                    var tempCronTime = new DateTime(2023, 1, 1, 7, 0, 0);
+                    var tempCron = Cron.Daily(tempCronTime.Hour, tempCronTime.Minute);
+                    while (jobGroups.FirstOrDefault(jb => jb.Key == tempCron) != null && jobGroups.FirstOrDefault(jb => jb.Key == tempCron).Count() > 5)
+                    {
+                        tempCronTime = tempCronTime.AddMinutes(5);
+                        tempCron = Cron.Daily(tempCronTime.Hour, tempCronTime.Minute);
+                    }
+                    baseCron = tempCron;
+                }
+                var baseCronArray = baseCron.Split(' ');
+                return new int[] { Convert.ToInt32(baseCronArray[1]), Convert.ToInt32(baseCronArray[0]) };
             }
         }
     }

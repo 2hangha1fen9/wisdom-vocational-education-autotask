@@ -20,7 +20,7 @@ namespace ScheduleTasks.Jobs
         /// 执行签到
         /// </summary>
         /// <returns></returns>
-        public void CheckIn(string checkInfoStr)
+        public async Task CheckIn(string checkInfoStr)
        {
             if(string.IsNullOrWhiteSpace(checkInfoStr))
             {
@@ -42,24 +42,23 @@ namespace ScheduleTasks.Jobs
             if (checkInfo.lFloat.Value)
             {
                 Random r = new Random();
-                checkInfo.LocationX += Math.Round(r.NextDouble() / 10000,6);
-                checkInfo.LocationY += Math.Round(r.NextDouble() / 10000,6);
+                checkInfo.LocationX += r.NextDouble() / 10000.0;
+                checkInfo.LocationY += r.NextDouble() / 10000.0;
             }
 
 
-            var token = GetToken(checkInfo);
+            var token = await GetToken(checkInfo);
             if (token != null && checkInfo != null)
             {
                 //构造请求体
                 var data = new List<KeyValuePair<string, string>> {
                     new KeyValuePair<string,string>("token",token),
                     new KeyValuePair<string,string>("checkType",checkInfo.CheckType),
-                    new KeyValuePair<string,string>("locationX", checkInfo.LocationX.ToString()),
-                    new KeyValuePair<string,string>("locationY", checkInfo.LocationY.ToString()),
+                    new KeyValuePair<string,string>("locationX", Math.Round(checkInfo.LocationX,6).ToString()),
+                    new KeyValuePair<string,string>("locationY", Math.Round(checkInfo.LocationY,6).ToString()),
                     new KeyValuePair<string,string>("scale", checkInfo.Scale.ToString()),
                     new KeyValuePair<string,string>("label", checkInfo.Label),
                     new KeyValuePair<string,string>("mapType", checkInfo.MapType),
-                    new KeyValuePair<string,string>("content", checkInfo.Content),
                     new KeyValuePair<string,string>("content", checkInfo.Content),
                     new KeyValuePair<string,string>("isAbnormal", checkInfo.IsAbnormal.ToString()),
                     new KeyValuePair<string,string>("isEvection", checkInfo.IsEvection.ToString()),
@@ -71,22 +70,22 @@ namespace ScheduleTasks.Jobs
                 var content = new FormUrlEncodedContent(data);
                 //发送请求
                 var client = clientFactory.CreateClient("executer");
-                var response = client.PostAsync("/mobile/process/stu-location/save", content).Result;
+                var response = await client.PostAsync("/mobile/process/stu-location/save", content);
 
-                //创建通知邮件
-                var mail = new MailTemplate
+                //发送邮件
+                if (!string.IsNullOrWhiteSpace(checkInfo.Email))
                 {
-                    ToEmail = checkInfo.Email,
-                    Subject = "[慧职教+] 签到任务"
-                };
-                //转换为Json对象
-                if (response.StatusCode == System.Net.HttpStatusCode.OK)
-                {
-                    //转换为Json对象
-                    JObject json = JObject.Parse(response.Content.ReadAsStringAsync().Result);
-                    if (!string.IsNullOrWhiteSpace(checkInfo.Email))
+                    //创建通知邮件
+                    var mail = new MailTemplate
                     {
-                        
+                        ToEmail = checkInfo.Email,
+                        Subject = "[慧职教+] 签到任务"
+                    };
+                    //转换为Json对象
+                    if (response.StatusCode == System.Net.HttpStatusCode.OK)
+                    {
+                        //转换为Json对象
+                        JObject json = JObject.Parse(await response.Content.ReadAsStringAsync());
                         if (json["code"].ToString() == "1") //签到失败
                         {
                             mail.Body = $@"执行结果：{json["msg"]}</br>
@@ -97,17 +96,17 @@ namespace ScheduleTasks.Jobs
                             mail.Body = $@"执行结果：签到成功</br>
                                            执行时间：{DateTime.Now.ToLocalTime()}</br>
                                            打卡位置：{checkInfo.Label}</br>
-                                           打卡坐标：X:{checkInfo.LocationX} Y:{checkInfo.LocationY}";
+                                           打卡坐标：X:{Math.Round(checkInfo.LocationX, 6)} Y:{Math.Round(checkInfo.LocationY, 6)}";
                         }
                     }
-                }
-                else
-                {
-                    mail.Body = $@"执行结果：目标服务器错误</br>
+                    else //执行失败
+                    {
+                        mail.Body = $@"执行结果：目标服务器错误</br>
                                执行时间：{DateTime.Now.ToLocalTime()}</br>
                                状态码：{response.StatusCode}</br>";
+                    }
+                    mailHelper.SendEmail(mail);
                 }
-                mailHelper.SendEmail(mail);
             }
         }
 
@@ -115,7 +114,7 @@ namespace ScheduleTasks.Jobs
         /// 获取token
         /// </summary>
         /// <returns></returns>
-        private string GetToken(CheckInReq checkInfo)
+        private async Task<string> GetToken(CheckInReq checkInfo)
         {
             //构造请求体
             var data = new List<KeyValuePair<string, string>> {
@@ -127,7 +126,7 @@ namespace ScheduleTasks.Jobs
             var content = new FormUrlEncodedContent(data);
             //发送请求
             var client = clientFactory.CreateClient("executer");
-            var response =  client.PostAsync("/mobile/login", content).Result;
+            var response = await client.PostAsync("/mobile/login", content);
             //转换为Json对象
             if (response.StatusCode == System.Net.HttpStatusCode.OK)
             {

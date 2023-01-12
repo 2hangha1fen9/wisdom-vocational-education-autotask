@@ -5,6 +5,9 @@ using StackExchange.Redis;
 using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
+var port = builder.Configuration.GetValue<int>("port");
+//配置端口
+builder.WebHost.UseUrls($"http://*:{port}");
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -58,7 +61,10 @@ if (app.Environment.IsDevelopment())
 }
 
 //启用计划任务控制面板
-app.UseHangfireDashboard();
+app.UseHangfireDashboard("/hangfire",new DashboardOptions
+{
+    Authorization = new[] { new CustomAuthorizeFilter() }
+});
 
 app.UseHttpsRedirection();
 
