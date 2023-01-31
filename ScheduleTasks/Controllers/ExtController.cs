@@ -13,6 +13,14 @@ namespace ScheduleTasks.Controllers
     [ApiController]
     public class ExtController : ControllerBase
     {
+        private readonly ILogger<CheckInJob> logger;
+
+        public ExtController(ILogger<CheckInJob> logger)
+        {
+            this.logger = logger;
+        }
+
+
         /// <summary>
         /// 订阅定时签到任务
         /// </summary>
@@ -28,6 +36,7 @@ namespace ScheduleTasks.Controllers
                 job => job.CheckIn(reqJson),
                 Cron.Daily(checkInReq.StartTime[0], checkInReq.StartTime[1]),TimeZoneInfo.Local
             );
+            logger.LogInformation($"{checkInReq.LoginName}订阅签到任务\n{reqJson}");
             return Ok();
         }
 
@@ -40,6 +49,7 @@ namespace ScheduleTasks.Controllers
         public IActionResult UnsubscribeCheckin([FromQuery]string loginName)
         {
             RecurringJob.RemoveIfExists(loginName);
+            logger.LogInformation($"{loginName}取消订阅签到任务");
             return Ok();
         }
 

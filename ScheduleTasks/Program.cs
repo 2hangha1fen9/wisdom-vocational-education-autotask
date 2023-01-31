@@ -5,6 +5,9 @@ using StackExchange.Redis;
 using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 var port = builder.Configuration.GetValue<int>("port");
 //ÅäÖÃ¶Ë¿Ú
 builder.WebHost.UseUrls($"http://*:{port}");
