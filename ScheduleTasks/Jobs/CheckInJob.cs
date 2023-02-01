@@ -1,25 +1,22 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ScheduleTasks.Domain;
 using ScheduleTasks.Utils;
-using System.ComponentModel;
 using System.Net;
 
 namespace ScheduleTasks.Jobs
 {
     public class CheckInJob
     {
-        private readonly IHttpClientFactory clientFactory;
+        private readonly DynamicProxyHttpClientFactory clientFactory;
         private readonly MailHelper mailHelper;
-        private readonly IConfiguration configuration;
         private readonly ILogger<CheckInJob> logger;
 
-        public CheckInJob(IHttpClientFactory clientFactory, MailHelper mailHelper,IConfiguration configuration, ILogger<CheckInJob> logger) 
-        { 
+        public CheckInJob(DynamicProxyHttpClientFactory clientFactory, MailHelper mailHelper, ILogger<CheckInJob> logger)
+        {
             this.clientFactory = clientFactory;
             this.mailHelper = mailHelper;
-            this.configuration = configuration;
             this.logger = logger;
         }
 
@@ -28,7 +25,7 @@ namespace ScheduleTasks.Jobs
         /// </summary>
         /// <returns></returns>
         public async Task CheckIn(string checkInfoStr)
-       {
+        {
             try
             {
                 if (string.IsNullOrWhiteSpace(checkInfoStr))
@@ -56,17 +53,7 @@ namespace ScheduleTasks.Jobs
                 }
 
                 //获取登录token
-                string token = null;
-                for (int i = 1; i <= 3; i++)
-                {
-                    //设置http代理
-                    SetProxyIP();
-                    token = GetToken(checkInfo);
-                    if (token != null)
-                    {
-                        break;
-                    }
-                }
+                string token = await GetToken(checkInfo);
                 if (checkInfo != null)
                 {
                     //构造请求体
@@ -84,68 +71,88 @@ namespace ScheduleTasks.Jobs
                         new KeyValuePair<string,string>("studentId", checkInfo.StudentId.ToString()),
                         new KeyValuePair<string,string>("internshipId", checkInfo.InternshipId.ToString()),
                     };
-
                     //转为form格式字符串
                     var content = new FormUrlEncodedContent(data);
-                    //使用代理发送请求
-                    using (var client = clientFactory.CreateClient("executer"))
+
+                    using (var httpClient = clientFactory.CreateClient("executer"))
                     {
-                        var response = await client.PostAsync("/mobile/process/stu-location/save", content);
+                        var response = await httpClient.PostAsync("/mobile/process/stu-location/save", content);
                         //获取签到结果
-                        JObject json = JObject.Parse(response.Content.ReadAsStringAsync().Result);
+                        JObject json = new JObject();
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var respContent = await response.Content.ReadAsStringAsync();
+                            json = JObject.Parse(respContent);
+                        }
+
                         //发送邮件
                         if (!string.IsNullOrWhiteSpace(checkInfo.Email))
                         {
-                            SendMail(checkInfo,response.StatusCode,json);
+                            SendMail(checkInfo, response.StatusCode, json);
                         }
-                        //签到结果处理
+
                         //签到失败抛出异常进行重试
-                        if (response.StatusCode != HttpStatusCode.OK || (json["code"].ToString() == "1" || json["code"].ToString() == "") || json["success"].ToString() == "False")
+                        if (!response.IsSuccessStatusCode || (json["code"].ToString() == "1" || json["code"].ToString() == "") || json["success"].ToString() == "False")
                         {
-                            if(json["msg"]?.ToString() != "今天你已经完成签到任务，不必再签到")
+                            if (json["msg"]?.ToString() != "今天你已经完成签到任务，不必再签到")
                             {
-                                throw new Exception($"{checkInfo.LoginName} 签到失败\n{json.ToString()}");
+                                throw new Exception($"{checkInfo.LoginName} 签到失败\n{json}");
                             }
                         }
                         else
                         {
-                            logger.LogInformation($"{checkInfo.LoginName} 签到成功\n{json.ToString()}");
-                        }                
+                            logger.LogInformation($"{checkInfo.LoginName} 签到成功\n{json}");
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex.Message ?? ex?.InnerException?.Message);
+                logger.LogError($"{ex.Message ?? ex?.InnerException?.Message}");
                 throw;
             }
         }
 
         /// <summary>
-        /// 设置代理ip
+        /// 获取token
         /// </summary>
-        private void SetProxyIP()
+        /// <returns></returns>
+        private async Task<string> GetToken(CheckInReq checkInfo)
         {
             try
             {
-                HttpClient.DefaultProxy = new WebProxy();
-                string api = configuration.GetSection("HttpProxyAPI").Value;
-                using (var request = new HttpClient())
+                //构造请求体
+                var data = new List<KeyValuePair<string, string>> {
+                    new KeyValuePair<string,string>("loginName",checkInfo.LoginName),
+                    new KeyValuePair<string,string>("password",checkInfo.Password),
+                    new KeyValuePair<string,string>("schoolId",checkInfo.SchoolId.ToString())
+                };
+                //转为form格式字符串
+                var content = new FormUrlEncodedContent(data);
+
+                //登录获取Token
+                using (var httpClient = clientFactory.CreateClient("executer"))
                 {
-                    var response = request.GetAsync(api).Result;
-                    if (response.StatusCode == HttpStatusCode.OK)
+                    var response = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                    response = await httpClient.PostAsync("/mobile/login", content);
+                    response.EnsureSuccessStatusCode();
+
+                    //将响应转换为Json获取Token
+                    var respContent = await response.Content.ReadAsStringAsync();
+                    JObject json = JObject.Parse(respContent);
+                    if (string.IsNullOrWhiteSpace(json["msg"].ToString()))
                     {
-                        string ip = response.Content.ReadAsStringAsync().Result;
-                        var proxy = new WebProxy(ip);
-                        HttpClient.DefaultProxy = proxy;
+                        return json["data"]["sessionId"].ToString();
                     }
+
+                    return string.Empty;
                 }
             }
             catch (Exception ex)
             {
-                logger.LogWarning($"代理IP获取失败\n{ex.Message ?? ex?.InnerException?.Message}");
+                logger.LogWarning($"{checkInfo.LoginName}获取Token失败\n{ex.Message ?? ex.InnerException?.Message}");
+                return string.Empty;
             }
-            
         }
 
         /// <summary>
@@ -153,7 +160,7 @@ namespace ScheduleTasks.Jobs
         /// </summary>
         /// <param name="checkInfo"></param>
         /// <param name="response"></param>
-        private async void SendMail(CheckInReq checkInfo, HttpStatusCode statusCode, JObject resultJson)
+        private void SendMail(CheckInReq checkInfo, HttpStatusCode statusCode, JObject resultJson)
         {
             try
             {
@@ -173,7 +180,7 @@ namespace ScheduleTasks.Jobs
                     }
                     else
                     {
-                        if(resultJson["msg"].ToString() == "今天你已经完成签到任务，不必再签到")
+                        if (resultJson["msg"].ToString() == "今天你已经完成签到任务，不必再签到")
                         {
                             mail.Body = $@"执行结果：{resultJson["msg"]}</br>
                                    执行时间：{DateTime.Now.ToLocalTime()}</br><hr/>
@@ -195,52 +202,11 @@ namespace ScheduleTasks.Jobs
                                执行时间：{DateTime.Now.ToLocalTime()}</br>
                                状态码：{statusCode}</br>";
                 }
-                await Task.Run(() => mailHelper.SendEmail(mail));
+                Task.Run(() => mailHelper.SendEmail(mail));
             }
             catch (Exception ex)
             {
-                logger.LogWarning($"{checkInfo.LoginName}邮件发送失败\n{ex.Message ?? ex.InnerException?.Message }");
-            }
-        }
-
-        /// <summary>
-        /// 获取token
-        /// </summary>
-        /// <returns></returns>
-        private string GetToken(CheckInReq checkInfo)
-        {
-            try
-            {
-                //构造请求体
-                var data = new List<KeyValuePair<string, string>> {
-                    new KeyValuePair<string,string>("loginName",checkInfo.LoginName),
-                    new KeyValuePair<string,string>("password",checkInfo.Password),
-                    new KeyValuePair<string,string>("schoolId",checkInfo.SchoolId.ToString())
-                };
-                //转为form格式字符串
-                var content = new FormUrlEncodedContent(data);
-                //发送请求
-                using (var client = clientFactory.CreateClient("executer"))
-                {
-                    var response = client.PostAsync("/mobile/login", content).Result;
-                    //转换为Json对象
-                    if (response.StatusCode == HttpStatusCode.OK)
-                    {
-                        //转换为Json对象
-                        JObject json = JObject.Parse(response.Content.ReadAsStringAsync().Result);
-                        if (string.IsNullOrWhiteSpace(json["msg"].ToString()))
-                        {
-                            return json["data"]["sessionId"].ToString();
-                        }
-                        throw new Exception(json.ToString());
-                    }
-                    throw new Exception("网络错误");
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning($"{checkInfo.LoginName}获取Token失败\n{ex.Message ?? ex.InnerException?.Message}");
-                return null;
+                logger.LogWarning($"{checkInfo.LoginName}邮件发送失败\n{ex.Message ?? ex.InnerException?.Message}");
             }
         }
     }

@@ -19,13 +19,11 @@
 		<TrimmerRootAssembly Include="mscorlib" />
 	</ItemGroup>
   <ItemGroup>
-    <PackageReference Include="AutoMapper" Version="12.0.0" />
-    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.0" />
     <PackageReference Include="Hangfire" Version="1.7.32" />
+    <PackageReference Include="Hangfire.Dashboard.BasicAuthorization" Version="1.0.2" />
     <PackageReference Include="HangFire.Redis" Version="2.0.1" />
     <PackageReference Include="Hangfire.Redis.StackExchange" Version="1.8.6" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="7.0.0" />
-    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.17.0" />
     <PackageReference Include="MimeKit" Version="3.4.3" />
     <PackageReference Include="NETCore.MailKit" Version="2.1.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.6.86" />

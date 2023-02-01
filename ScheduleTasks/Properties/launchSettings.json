@@ -5,7 +5,8 @@
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "LANG": "en_US.UTF-8"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "http://localhost:8888"

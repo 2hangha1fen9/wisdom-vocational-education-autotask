@@ -1,12 +1,17 @@
 using Hangfire;
+using Hangfire.Dashboard.BasicAuthorization;
+using Microsoft.Extensions.DependencyInjection;
 using ScheduleTasks.Domain;
 using ScheduleTasks.Utils;
 using StackExchange.Redis;
-using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+}
+
 
 var port = builder.Configuration.GetValue<int>("port");
 //配置端口
@@ -19,19 +24,22 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 //邮件配置注册
-builder.Services.AddSingleton<MailConfig>(builder.Configuration.GetSection("MailConfig").Get<MailConfig>());
+builder.Services.AddSingleton(builder.Configuration.GetSection("MailConfig").Get<MailConfig>());
 builder.Services.AddScoped<MailHelper>();
 //Redis客户端注册
 builder.Services.AddSingleton<IConnectionMultiplexer>(cm =>
 {
     return ConnectionMultiplexer.Connect(builder.Configuration.GetConnectionString("redis"));
 });
-//注册http客户端用于发起请求
-builder.Services.AddHttpClient("executer", conf =>
+//HttpClient
+builder.Services.AddSingleton(new DynamicProxyHttpClientFactory
 {
-    conf.BaseAddress = new Uri(builder.Configuration.GetConnectionString("api"));
-    conf.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "application/x-www-form-urlencoded");
+    BaseAddress = new Uri(builder.Configuration.GetConnectionString("api")),
+    DefaultContentType = "application/x-www-form-urlencoded",
+    Timeout = TimeSpan.FromSeconds(300),
+    ProxyAPI = builder.Configuration.GetConnectionString("proxyApi")
 });
+
 //配置计划任务
 builder.Services.AddHangfire(configuration =>
 {
@@ -66,7 +74,24 @@ if (app.Environment.IsDevelopment())
 //启用计划任务控制面板
 app.UseHangfireDashboard("/hangfire",new DashboardOptions
 {
-    Authorization = new[] { new CustomAuthorizeFilter() }
+    Authorization = new[]
+    {
+        new BasicAuthAuthorizationFilter(new BasicAuthAuthorizationFilterOptions
+        {
+            RequireSsl = false,
+            SslRedirect = false,
+            LoginCaseSensitive = true,
+            Users = new []
+            {
+                new BasicAuthAuthorizationUser
+                {
+                    Login = "hangfire",
+                    PasswordClear =  "000000"
+                }
+            }
+        })
+    },
+    DashboardTitle = "慧职教+任务调度中心",
 });
 
 app.UseHttpsRedirection();
