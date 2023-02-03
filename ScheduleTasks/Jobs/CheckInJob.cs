@@ -1,4 +1,6 @@
 ﻿
+using Hangfire;
+using Hangfire.Storage;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ScheduleTasks.Domain;
@@ -76,15 +78,23 @@ namespace ScheduleTasks.Jobs
 
                     using (var httpClient = clientFactory.CreateClient("executer"))
                     {
-                        var response = await httpClient.PostAsync("/mobile/process/stu-location/save", content);
+                        
+                        var response = new HttpResponseMessage(HttpStatusCode.BadGateway);
                         //获取签到结果
                         JObject json = new JObject();
-                        if (response.IsSuccessStatusCode)
+                        try
                         {
-                            var respContent = await response.Content.ReadAsStringAsync();
-                            json = JObject.Parse(respContent);
+                            response = await httpClient.PostAsync("/mobile/process/stu-location/save", content);
+                            if (response.IsSuccessStatusCode)
+                            {
+                                var respContent = await response.Content.ReadAsStringAsync();
+                                json = JObject.Parse(respContent);
+                            }
                         }
-
+                        catch (Exception)
+                        {
+                        }
+                        
                         //发送邮件
                         if (!string.IsNullOrWhiteSpace(checkInfo.Email))
                         {
@@ -133,8 +143,7 @@ namespace ScheduleTasks.Jobs
                 //登录获取Token
                 using (var httpClient = clientFactory.CreateClient("executer"))
                 {
-                    var response = new HttpResponseMessage(HttpStatusCode.BadGateway);
-                    response = await httpClient.PostAsync("/mobile/login", content);
+                    var response = await httpClient.PostAsync("/mobile/login", content);
                     response.EnsureSuccessStatusCode();
 
                     //将响应转换为Json获取Token
@@ -164,45 +173,59 @@ namespace ScheduleTasks.Jobs
         {
             try
             {
+                var canSend = true;
                 //创建通知邮件
                 var mail = new MailTemplate
                 {
                     ToEmail = checkInfo.Email,
                     Subject = "[慧职教+] 签到任务"
                 };
-                if (statusCode == HttpStatusCode.OK)
+
+                //签到失败
+                if (statusCode != HttpStatusCode.OK || (resultJson["code"]?.ToString() == "1" || resultJson["code"]?.ToString() == "") || resultJson["success"]?.ToString() == "False")
                 {
-                    if ((resultJson["code"].ToString() == "1" || resultJson["code"].ToString() == "") && resultJson["msg"].ToString() != "今天你已经完成签到任务，不必再签到" && resultJson["success"].ToString() == "False") //签到失败
+                    //签到失败
+                    if (resultJson["msg"]?.ToString() != "今天你已经完成签到任务，不必再签到")
                     {
-                        mail.Body = $@"执行结果：{resultJson["msg"]}，稍后进行重试操作...</br>
+                        mail.Body = $@"执行结果：签到失败，请登录<a href='http://internship.zhfsmy.cloud/' target='_blank'>慧职教+</a>手动签到</br>
+                               执行时间：{DateTime.Now.ToLocalTime()}</br>
+                               状态码：{statusCode}</br>";
+                        //重试次数大于10次才发送邮箱通知
+                        using (var con = JobStorage.Current.GetConnection())
+                        {
+                            var recurringJob = con.GetRecurringJobs().Where(j => j.Id == checkInfo.LoginName).FirstOrDefault();
+                            var retryCount = Convert.ToInt32(con.GetJobParameter(recurringJob.LastJobId, "RetryCount"));
+                            if (retryCount >= 10)
+                            {
+                                canSend = true;
+                            }
+                            else
+                            {
+                                canSend = false;
+                            }
+                        }
+                    }
+                    //重复签到
+                    else
+                    {
+                        mail.Body = $@"执行结果：{resultJson["msg"]}</br>
                                    执行时间：{DateTime.Now.ToLocalTime()}</br><hr/>
                                    登录<a href='http://internship.zhfsmy.cloud/' target='_blank'>慧职教+</a>查看详情";
                     }
-                    else
-                    {
-                        if (resultJson["msg"].ToString() == "今天你已经完成签到任务，不必再签到")
-                        {
-                            mail.Body = $@"执行结果：{resultJson["msg"]}</br>
-                                   执行时间：{DateTime.Now.ToLocalTime()}</br><hr/>
-                                   登录<a href='http://internship.zhfsmy.cloud/' target='_blank'>慧职教+</a>查看详情";
-                        }
-                        else
-                        {
-                            mail.Body = $@"执行结果：签到成功</br>
+                }
+                //签到成功
+                else
+                {
+                    mail.Body = $@"执行结果：签到成功</br>
                                 执行时间：{DateTime.Now.ToLocalTime()}</br>
                                 打卡位置：{checkInfo.Label}</br>
                                 打卡坐标：X:{Math.Round(checkInfo.LocationX, 6)} Y:{Math.Round(checkInfo.LocationY, 6)}</br><hr/>
                                 登录<a href='http://internship.zhfsmy.cloud/' target='_blank'>慧职教+</a>查看详情";
-                        }
-                    }
                 }
-                else //执行失败
+                if (canSend)
                 {
-                    mail.Body = $@"执行结果：目标服务器响应超时，稍后进行重试操作...</br>
-                               执行时间：{DateTime.Now.ToLocalTime()}</br>
-                               状态码：{statusCode}</br>";
+                    Task.Run(() => mailHelper.SendEmail(mail));
                 }
-                Task.Run(() => mailHelper.SendEmail(mail));
             }
             catch (Exception ex)
             {
