@@ -1,4 +1,6 @@
-﻿using Hangfire;
+﻿using System.Threading.RateLimiting;
+using Hangfire;
+using Hangfire.Redis;
 using Hangfire.Server;
 using Hangfire.Storage;
 using Microsoft.AspNetCore.Http;
@@ -6,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
 using ScheduleTasks.Domain;
 using ScheduleTasks.Jobs;
+using StackExchange.Redis;
 
 namespace ScheduleTasks.Controllers
 {
@@ -14,10 +17,12 @@ namespace ScheduleTasks.Controllers
     public class ExtController : ControllerBase
     {
         private readonly ILogger<CheckInJob> logger;
+        private readonly IConnectionMultiplexer redisConnection;
 
-        public ExtController(ILogger<CheckInJob> logger)
+        public ExtController(ILogger<CheckInJob> logger,IConnectionMultiplexer redisConnection)
         {
             this.logger = logger;
+            this.redisConnection = redisConnection;
         }
 
 
@@ -106,6 +111,90 @@ namespace ScheduleTasks.Controllers
                 }
                 var baseCronArray = baseCron.Split(' ');
                 return new int[] { Convert.ToInt32(baseCronArray[1]), Convert.ToInt32(baseCronArray[0]) };
+            }
+        }
+
+        /// <summary>
+        /// 获取所有附件
+        /// </summary>
+        /// <param name="loginName"></param>
+        /// <returns></returns>
+        [HttpGet]
+        public List<Attach> ListAttach([FromQuery] string loginName)
+        {
+            var attachList = new List<Attach>();
+            try
+            {
+                var database = redisConnection.GetDatabase(1);
+                var redisValue = database.StringGet(loginName);
+                var result = database.ScriptEvaluate(LuaScript.Prepare($"local res = redis.call('KEYS','*{loginName}*') return res"));
+                if (!result.IsNull)
+                {
+                    RedisKey[] keys = (RedisKey[])result;
+                    foreach (var key in keys)
+                    {
+                        var value = database.StringGet(key);
+                        attachList.Add(JsonConvert.DeserializeObject<Attach>(value));
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e.Message);
+                
+            }
+            return attachList;
+        }
+
+        /// <summary>
+        /// 添加附件
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost]
+        public IActionResult AddAttach(Attach attach)
+        {
+            try
+            {
+                var database = redisConnection.GetDatabase(1);
+                var key = $"{attach.LoginName}:{attach.Id}";
+                var stringSet = database.StringSet(key, JsonConvert.SerializeObject(attach));
+                if (stringSet)
+                {
+                    return Ok();
+                }
+                return BadRequest();
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e.Message);
+                return BadRequest();
+            }
+        }
+
+        /// <summary>
+        /// 删除附件
+        /// </summary>
+        /// <param name="loginName"></param>
+        /// <param name="attach"></param>
+        /// <returns></returns>
+        [HttpDelete]
+        public IActionResult DeleteAttach(Attach attach)
+        {
+            try
+            {
+                var database = redisConnection.GetDatabase(1);
+                var key = $"{attach.LoginName}:{attach.Id}";
+                var stringSet = database.KeyDelete(key);
+                if (stringSet)
+                {
+                    return Ok();
+                }
+                return BadRequest();
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e.Message);
+                return BadRequest();
             }
         }
     }

@@ -74,5 +74,13 @@
         /// 时间浮动
         /// </summary>
         public bool? tFloat { get; set; } = false;
+        /// <summary>
+        /// 附件ID
+        /// </summary>
+        public List<int>? AttachIds { get; set; }
+        /// <summary>
+        /// 是否随机上传已有附件
+        /// </summary>
+        public bool? RandomAttach { get; set; } = false;
     }
 }

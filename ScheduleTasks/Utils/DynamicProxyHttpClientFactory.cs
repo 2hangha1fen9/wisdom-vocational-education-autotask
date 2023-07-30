@@ -44,11 +44,11 @@ namespace ScheduleTasks.Utils
                 {
                     Proxy = new WebProxy($"{proxy.Ip}:{proxy.Port}"),
                     UseProxy = true,
-                });
+                },true);
                 client.Timeout = Timeout;
                 client.BaseAddress = BaseAddress;
                 client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", DefaultContentType);
-                
+
                 return client;
             }
         }
@@ -76,7 +76,7 @@ namespace ScheduleTasks.Utils
                         proxyInfos.Remove(temp);
                         if (temp != null && temp.EndTime > nowTime)
                         {
-                            Console.WriteLine($"取出IP： {temp.Ip}:{temp.Port} 剩余：{proxyInfos.Count}");
+                            Console.WriteLine($"[动态代理] 取出IP： {temp.Ip}:{temp.Port} 剩余：{proxyInfos.Count}");
                             proxy = temp;
                             break;
                         }
@@ -110,7 +110,7 @@ namespace ScheduleTasks.Utils
                         //正常响应将存储获取到的代理IP
                         if (resp.Success && resp.Code == 0)
                         {
-                            Console.WriteLine($"提取IP\n{ips}");
+                            Console.WriteLine($"[动态代理] 提取IP\n{ips}");
                             proxyInfos.AddRange(resp.Data);
                         }
                         else
