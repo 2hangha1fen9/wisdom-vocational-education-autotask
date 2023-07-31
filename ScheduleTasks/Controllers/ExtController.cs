@@ -1,4 +1,5 @@
-﻿using System.Threading.RateLimiting;
+﻿using System.Net.Http.Headers;
+using System.Threading.RateLimiting;
 using Hangfire;
 using Hangfire.Redis;
 using Hangfire.Server;
@@ -6,8 +7,10 @@ using Hangfire.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using ScheduleTasks.Domain;
 using ScheduleTasks.Jobs;
+using ScheduleTasks.Utils;
 using StackExchange.Redis;
 
 namespace ScheduleTasks.Controllers
@@ -18,11 +21,13 @@ namespace ScheduleTasks.Controllers
     {
         private readonly ILogger<CheckInJob> logger;
         private readonly IConnectionMultiplexer redisConnection;
+        private readonly DynamicProxyHttpClientFactory clientFactory;
 
-        public ExtController(ILogger<CheckInJob> logger,IConnectionMultiplexer redisConnection)
+        public ExtController(ILogger<CheckInJob> logger,IConnectionMultiplexer redisConnection,DynamicProxyHttpClientFactory clientFactory)
         {
             this.logger = logger;
             this.redisConnection = redisConnection;
+            this.clientFactory = clientFactory;
         }
 
 
@@ -147,28 +152,59 @@ namespace ScheduleTasks.Controllers
         }
 
         /// <summary>
-        /// 添加附件
+        /// 上传附件
         /// </summary>
+        /// <param name="token"></param>
+        /// <param name="data"></param>
         /// <returns></returns>
         [HttpPost]
-        public IActionResult AddAttach(Attach attach)
+        public async Task<Attach> UploadAttach([FromForm] string token,[FromForm] string loginName, [FromForm] IFormFile file)
         {
             try
             {
-                var database = redisConnection.GetDatabase(1);
-                var key = $"{attach.LoginName}:{attach.Id}";
-                var stringSet = database.StringSet(key, JsonConvert.SerializeObject(attach));
-                if (stringSet)
+                using (var client = new HttpClient())
                 {
-                    return Ok();
+                    //设置请求头
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "multipart/form-data");
+                    //设置文件
+                    var form = new MultipartFormDataContent();
+                    form.Add(new StringContent("IMAGE"),"type");
+                    // 添加文件数据
+                    var fileContent = new StreamContent(file.OpenReadStream());
+                    fileContent.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+                    {
+                        Name = "file",
+                        FileName = file.FileName
+                    };
+                    form.Add(fileContent);
+                    var response = await client.PostAsync($"http://183.230.44.139:8090/mobile/sys/attach/upload?token={token}", form);
+                    response.EnsureSuccessStatusCode();
+                    var respContent = await response.Content.ReadAsStringAsync();
+                    var json = JObject.Parse(respContent);
+                    //添加附件信息到redis
+                    if (json["code"].Value<int>() == 0)
+                    {
+                        var database = redisConnection.GetDatabase(1);
+                        var attach = new Attach
+                        {
+                            Id = json["data"]["id"].Value<int>(),
+                            Path = json["data"]["path"].Value<string>(),
+                            LoginName = loginName
+                        };
+                        var key = $"{loginName}:{attach.Id}";
+                        var stringSet = database.StringSet(key, JsonConvert.SerializeObject(attach));
+                        if (stringSet)
+                        {
+                            return attach;
+                        }
+                    }
                 }
-                return BadRequest();
             }
             catch (Exception e)
             {
                 logger.LogError(e.Message);
-                return BadRequest();
             }
+            return null;
         }
 
         /// <summary>
