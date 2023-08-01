@@ -57,23 +57,34 @@ namespace ScheduleTasks.Jobs
                     checkInfo.LocationY += r.NextDouble() / 10000.0;
                 }
                 //获取附件列表
-                var attachs = GetAttachs(checkInfo.LoginName);
-                if (checkInfo.RandomAttach.Value && attachs.Count > 0)
+                var attachIdsStr = "";
+                if (checkInfo.AttachIds.Count > 0)
                 {
-                    // 随机选择的附件数量
-                    int count = new Random().Next(1, attachs.Count); // 随机选择3、4、5或6个附件
-                    
-                    int n = attachs.Count;
-                    while (n > 1)
-                    {
-                        n--;
-                        int k = new Random().Next(n + 1);
-                        (attachs[k], attachs[n]) = (attachs[n], attachs[k]);
-                    }
-
-                    // 选择前 numAttachments 个附件
-                    attachs = attachs.Take(count).ToList();
+                    attachIdsStr = string.Join(',', checkInfo.AttachIds);
                 }
+                else
+                {
+                    var attachs = GetAttachs(checkInfo.LoginName);
+                    if (checkInfo.RandomAttach.Value && attachs.Count > 0)
+                    {
+                        // 随机选择的附件数量
+                        int count = new Random().Next(1, attachs.Count); // 随机选择3、4、5或6个附件
+                    
+                        int n = attachs.Count;
+                        while (n > 1)
+                        {
+                            n--;
+                            int k = new Random().Next(n + 1);
+                            (attachs[k], attachs[n]) = (attachs[n], attachs[k]);
+                        }
+
+                        // 选择前 numAttachments 个附件
+                        attachs = attachs.Take(count).ToList();
+
+                        attachIdsStr = string.Join(',', attachs.Select(i => i.Id).ToList());
+                    }
+                }
+               
 
                 //获取登录token
                 string token = await GetToken(checkInfo);
@@ -93,12 +104,9 @@ namespace ScheduleTasks.Jobs
                         new KeyValuePair<string,string>("isEvection", checkInfo.IsEvection.ToString()),
                         new KeyValuePair<string,string>("studentId", checkInfo.StudentId.ToString()),
                         new KeyValuePair<string,string>("internshipId", checkInfo.InternshipId.ToString()),
+                        new KeyValuePair<string,string>("attachIds",attachIdsStr)
                     };
-                    if (attachs.Count > 0)
-                    {
-                        data.Add(new("attachIds",string.Join(',',attachs.Select(a => a.Id))));
-                    }
-                    
+
                     //转为form格式字符串
                     var content = new FormUrlEncodedContent(data);
 

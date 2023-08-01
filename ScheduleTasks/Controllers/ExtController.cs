@@ -162,7 +162,8 @@ namespace ScheduleTasks.Controllers
         {
             try
             {
-                using (var client = new HttpClient())
+                //using (var client = new HttpClient())
+                using (var client = clientFactory.CreateClient("executer"))
                 {
                     //设置请求头
                     client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "multipart/form-data");
@@ -174,10 +175,11 @@ namespace ScheduleTasks.Controllers
                     fileContent.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
                     {
                         Name = "file",
-                        FileName = file.FileName
+                        FileName = $"{DateTime.Now.ToFileTime()}{Path.GetExtension(file.FileName)}"
                     };
                     form.Add(fileContent);
-                    var response = await client.PostAsync($"http://183.230.44.139:8090/mobile/sys/attach/upload?token={token}", form);
+                    var response = await client.PostAsync($"/mobile/sys/attach/upload?token={token}", form);
+                    //var response = await client.PostAsync($"http://183.230.44.139:8090/mobile/sys/attach/upload?token={token}", form);
                     response.EnsureSuccessStatusCode();
                     var respContent = await response.Content.ReadAsStringAsync();
                     var json = JObject.Parse(respContent);
